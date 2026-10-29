@@ -260,9 +260,10 @@ add-zsh-hook precmd _iterm2_precmd_label
 
 ## How it works
 
-- **`_iterm2_hash`** — hashes the project name with `md5`, strips hex letters, takes the first
-  8 digits, then normalizes them as base 10. This avoids zsh interpreting leading-zero hashes
-  as octal. Deterministic, so identity is consistent everywhere.
+- **`_iterm2_hash`** — hashes the project name with `md5`, keeps the first eight hexadecimal
+  digits, and explicitly interprets them as base 16. This avoids zsh interpreting leading-zero
+  hashes as octal while preserving the hash's hexadecimal value. Deterministic, so identity is
+  consistent everywhere.
 - **`_iterm2_project_emoji` / `_iterm2_project_color`** — index into the emoji/color pools with
   `hash % pool_size`. Color hashes a `color_`-prefixed string so emoji and color pick
   independently.
