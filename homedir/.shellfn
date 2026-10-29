@@ -438,8 +438,11 @@ _ITERM2_COLOR_POOL=(
 )
 
 function _iterm2_hash() {
-  # Deterministic hash of a string -> integer
-  printf '%s' "$1" | md5 | tr -d 'a-f' | cut -c1-8
+  # Keep eight hexadecimal digits, then explicitly interpret them as base 16
+  # so leading zeros and a-f digits work consistently in zsh arithmetic.
+  local digits
+  digits=$(printf '%s' "$1" | md5 | awk '{print $NF}' | cut -c1-8)
+  printf '%s\n' "$((16#$digits))"
 }
 
 function _iterm2_project_emoji() {
@@ -520,13 +523,13 @@ function iproj() {
 function iproj-list() {
   local search_dir="${1:-$PWD}"
   echo "Project tab identities in $search_dir:"
-  # Iterate subdirs via `find` rather than a glob so this file stays
-  # parseable under bash (the zsh-only `*(N)` null-glob qualifier is a bash
-  # syntax error) and so an empty/childless dir just yields nothing instead
-  # of zsh's default NOMATCH error.
+  # Use a shell glob so this works with the BSD find shipped on macOS as well
+  # as GNU find. In zsh, disable NOMATCH locally so empty directories are fine.
   local repo name emoji color_str
   local -a rgb
-  while IFS= read -r repo; do
+  [[ -n "$ZSH_VERSION" ]] && setopt local_options nonomatch
+  for repo in "$search_dir"/*; do
+    [[ -d "$repo" && ! -L "$repo" ]] || continue
     # -e (not -d): a worktree/submodule .git is a gitlink *file*, not a dir.
     [[ -e "$repo/.git" ]] || continue
     name=$(basename "$repo")

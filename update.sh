@@ -71,12 +71,20 @@ ini_get() {
 migrate_gitconfig_identity() {
   local tracked="$ROOT_DIR/homedir/.gitconfig"
   local local_cfg="$HOME/.gitconfig.local"
+  local tmp_cfg=""
 
   [ -f "$tracked" ] || return 0
 
-  if [ -f "$local_cfg" ] && grep -q '^\[user\]' "$local_cfg"; then
+  if [ -f "$local_cfg" ] && [ ! -L "$local_cfg" ] && grep -q '^\[user\]' "$local_cfg"; then
     ok "git identity already lives in ~/.gitconfig.local — nothing to migrate"
     return 0
+  fi
+
+  if [ -e "$local_cfg" ] || [ -L "$local_cfg" ]; then
+    if [ ! -f "$local_cfg" ] || [ -L "$local_cfg" ]; then
+      error "cannot safely update ~/.gitconfig.local: it exists but is not a regular file"
+      return 1
+    fi
   fi
 
   local name email ghuser
@@ -94,32 +102,67 @@ migrate_gitconfig_identity() {
     return 0
   fi
 
-  running "moving your git identity to ~/.gitconfig.local ($name, $email, $ghuser)"
+  tmp_cfg=$(mktemp "$HOME/.gitconfig.local.XXXXXX") || {
+    error "could not create a private temporary git-config file; migration stopped"
+    return 1
+  }
+  if [ -f "$local_cfg" ] && ! cat "$local_cfg" >"$tmp_cfg"; then
+    rm -f "$tmp_cfg"
+    error "could not preserve the existing ~/.gitconfig.local; migration stopped"
+    return 1
+  fi
   {
-    echo "# Local git identity — NOT tracked by the dotfiles repo."
-    echo "# Migrated by update.sh; edit freely. Pulled in via [include] in ~/.gitconfig."
-    echo "[user]"
+    printf '\n# Local git identity — NOT tracked by the dotfiles repo.\n'
+    printf '# Migrated by update.sh; edit freely. Pulled in via [include] in ~/.gitconfig.\n'
+    printf '[user]\n'
     [ -n "$name" ] && printf '\tname = %s\n' "$name"
     [ -n "$email" ] && printf '\temail = %s\n' "$email"
     if [ -n "$ghuser" ]; then
-      echo "[github]"
+      printf '[github]\n'
       printf '\tuser = %s\n' "$ghuser"
     fi
-  } >"$local_cfg"
-  ok
+  } >>"$tmp_cfg" || {
+    rm -f "$tmp_cfg"
+    error "could not write the migrated identity; migration stopped"
+    return 1
+  }
+
+  # Back up and verify the tracked file before changing either copy.
+  BACKUP_DIR="$HOME/.dotfiles_backup/$(date +%Y.%m.%d.%H.%M.%S)"
+  if ! mkdir -p "$HOME/.dotfiles_backup" || ! mkdir "$BACKUP_DIR"; then
+    rm -f "$tmp_cfg"
+    error "could not create a new backup directory; migration stopped before changing identity files"
+    return 1
+  fi
+  if ! cp -p "$tracked" "$BACKUP_DIR/.gitconfig" || ! cmp -s "$tracked" "$BACKUP_DIR/.gitconfig"; then
+    rm -f "$tmp_cfg"
+    error "git-config backup failed verification; migration stopped before changing identity files"
+    return 1
+  fi
+
+  running "moving the tracked git identity to ~/.gitconfig.local"
+  if ! mv "$tmp_cfg" "$local_cfg"; then
+    rm -f "$tmp_cfg"
+    error "could not install ~/.gitconfig.local; tracked identity remains unchanged"
+    return 1
+  fi
 
   # The tracked file may carry other personal tweaks (e.g. includeIf blocks).
-  # Back it up, then restore it to its committed state so the pull is clean.
-  BACKUP_DIR="$HOME/.dotfiles_backup/$(date +%Y.%m.%d.%H.%M.%S)"
-  mkdir -p "$BACKUP_DIR"
-  cp "$tracked" "$BACKUP_DIR/.gitconfig"
-  git checkout -- homedir/.gitconfig 2>/dev/null || true
+  # The verified copy above is recoverable if checkout fails.
+  if ! git checkout -- homedir/.gitconfig; then
+    error "could not restore homedir/.gitconfig; verified backup retained at $BACKUP_DIR/.gitconfig"
+    return 1
+  fi
+  ok
   warn "backed up your previous homedir/.gitconfig to $BACKUP_DIR/.gitconfig"
   warn "if it had other personal git settings (e.g. includeIf blocks), copy them into ~/.gitconfig.local"
 }
 
 action "checking for migrations"
-migrate_gitconfig_identity
+if ! migrate_gitconfig_identity; then
+  error "identity migration failed; stopping before pulling or running the installer"
+  exit 1
+fi
 
 # ###########################################################
 # Pull the latest code safely
