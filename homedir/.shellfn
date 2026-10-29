@@ -537,7 +537,7 @@ function iproj-list() {
     color_str="$(_iterm2_project_color "$name")"
     rgb=( ${=color_str} )
     printf "  %s %-25s  rgb(%3d,%3d,%3d)\n" "$emoji" "$name" "${rgb[1]}" "${rgb[2]}" "${rgb[3]}"
-  done < <(find "$search_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+  done
 }
 
 # Auto-apply iTerm2 tab labels on cd — finds nearest git root
